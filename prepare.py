@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
-SYMBOLS = ["SPY", "QQQ", "IWM"]
+SYMBOLS = ["SPY", "QQQ", "AAPL"]  # 改用 AAPL 替代 IWM
 START_DATE = "2023-01-01"
 END_DATE = "2024-12-31"
 INITIAL_CAPITAL = 100000
