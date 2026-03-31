@@ -1,9 +1,11 @@
-"""量化策略回测固定模块 - 数据获取与评估"""
+"""量化策略回测固定模块 - 获取真实市场数据"""
 import numpy as np
 import pandas as pd
-import yfinance as yf
+import pandas_datareader as pdr
+from datetime import datetime, timedelta
+import time
 
-SYMBOLS = ["SPY", "QQQ", "AAPL"]  # 改用 AAPL 替代 IWM
+SYMBOLS = ["SPY", "QQQ", "AAPL"]
 START_DATE = "2023-01-01"
 END_DATE = "2024-12-31"
 INITIAL_CAPITAL = 100000
@@ -11,19 +13,29 @@ COMMISSION = 0.001
 
 class DataCache:
     _cache = {}
+    
     @classmethod
     def get_data(cls, symbols, start_date, end_date):
+        """获取真实市场数据 - 使用 pandas_datareader"""
         key = (tuple(sorted(symbols)), start_date, end_date)
         if key not in cls._cache:
             data = {}
-            print(f"📊 下载行情数据 {len(symbols)} 个品种...")
+            print(f"📊 下载真实行情数据 {len(symbols)} 个品种...")
             for symbol in symbols:
                 try:
-                    df = yf.download(symbol, start=start_date, end=end_date, progress=False, timeout=10)
+                    print(f"  ⏳ 正在下载 {symbol}...")
+                    # 使用 pandas_datareader 从 Yahoo Finance 获取数据
+                    df = pdr.get_data_yahoo(symbol, start=start_date, end=end_date)
+                    
+                    # 确保列名正确
+                    if 'Adj Close' in df.columns:
+                        df['Close'] = df['Adj Close']
+                    
                     data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
                     print(f"  ✓ {symbol}: {len(df)} 根 K 线")
+                    time.sleep(1)  # 避免被限流
                 except Exception as e:
-                    print(f"  ✗ {symbol}: 下载失败 - {e}")
+                    print(f"  ✗ {symbol}: 下载失败 - {str(e)}")
                     return None
             cls._cache[key] = data
         return cls._cache[key]
@@ -71,4 +83,11 @@ def evaluate_strategy_score(pnl_history):
     score = sharpe - 0.5 * abs(max_dd) + 0.1 * win_rate
     final_pnl = pnl_history[-1] - INITIAL_CAPITAL
     total_returns = final_pnl / INITIAL_CAPITAL if INITIAL_CAPITAL > 0 else 0
-    return {'score': float(score), 'sharpe': float(sharpe if not np.isinf(sharpe) else -999), 'max_drawdown': float(max_dd), 'win_rate': float(win_rate), 'final_pnl': float(final_pnl), 'total_returns': float(total_returns)}
+    return {
+        'score': float(score), 
+        'sharpe': float(sharpe if not np.isinf(sharpe) else -999), 
+        'max_drawdown': float(max_dd), 
+        'win_rate': float(win_rate), 
+        'final_pnl': float(final_pnl), 
+        'total_returns': float(total_returns)
+    }
