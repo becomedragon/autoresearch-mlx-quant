@@ -1,13 +1,11 @@
-"""量化策略回测固定模块 - A股真实数据"""
+"""量化策略回测固定模块 - A股真实数据（完全免费）"""
 import numpy as np
 import pandas as pd
-import tushare as ts
+import akshare as ak
 import time
 
-# ⚠️ 替换成你的 Tushare Token！
-TOKEN = "d5319aa70ec2b59f41e92dd2c7b62556fd61cf261c4f720cd13d5d32"  # 从 https://www.tushare.pro/ 获取
-
-SYMBOLS = ["000001.SZ", "000858.SZ", "600000.SH"]  # 平安银行、五粮液、浦发银行
+SYMBOLS = ["000001", "000858", "600000"]  # 平安银行、五粮液、浦发银行
+SYMBOL_NAMES = {"000001": "平安银行", "000858": "五粮液", "600000": "浦发银行"}
 START_DATE = "20230101"
 END_DATE = "20241231"
 INITIAL_CAPITAL = 100000
@@ -18,47 +16,52 @@ class DataCache:
     
     @classmethod
     def get_data(cls, symbols, start_date, end_date):
-        """从 Tushare 获取 A股真实数据"""
+        """从 akshare 获取 A股真实数据（完全免费）"""
         key = (tuple(sorted(symbols)), start_date, end_date)
         if key not in cls._cache:
             data = {}
-            print(f"📊 从 Tushare 下载 A股真实行情数据 {len(symbols)} 个...")
-            
-            pro = ts.pro_api(TOKEN)
+            print(f"📊 从 akshare 下载 A股真实行情数据 {len(symbols)} 个...")
             
             for symbol in symbols:
                 try:
-                    print(f"  ⏳ 正在下载 {symbol}...")
+                    print(f"  ⏳ 正在下载 {SYMBOL_NAMES.get(symbol, symbol)}({symbol})...")
                     
-                    # 获取日线数据
-                    df = pro.daily(
-                        ts_code=symbol,
+                    # 获取日线数据（完全免费）
+                    df = ak.stock_zh_a_hist(
+                        symbol=symbol,
+                        period="daily",
                         start_date=start_date,
-                        end_date=end_date
+                        end_date=end_date,
+                        adjust="qfq"  # 前复权
                     )
                     
                     if df is None or df.empty:
-                        print(f"  ✗ {symbol}: 返回空数据")
+                        print(f"  ✗ {symbol}: 返回空数���")
                         return None
                     
-                    # 按时间排序
-                    df = df.sort_values('trade_date')
-                    df['trade_date'] = pd.to_datetime(df['trade_date'])
-                    df = df.set_index('trade_date')
-                    
-                    # 重命名列
+                    # 重命名列匹配我们的格式
                     df = df.rename(columns={
-                        'open': 'Open',
-                        'high': 'High',
-                        'low': 'Low',
-                        'close': 'Close',
-                        'vol': 'Volume'
+                        '日期': 'Date',
+                        '开盘': 'Open',
+                        '最高': 'High',
+                        '最低': 'Low',
+                        '收盘': 'Close',
+                        '成交量': 'Volume'
                     })
                     
-                    data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
-                    print(f"  ✓ {symbol}: {len(df)} 根 K 线")
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    df = df.set_index('Date')
+                    df = df.sort_index()
                     
-                    time.sleep(0.5)  # API 速率限制
+                    # 转换数据类型
+                    for col in ['Open', 'High', 'Low', 'Close']:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                    df['Volume'] = pd.to_numeric(df['Volume'], errors='coerce')
+                    
+                    data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
+                    print(f"  ✓ {SYMBOL_NAMES.get(symbol, symbol)}: {len(df)} 根 K 线")
+                    
+                    time.sleep(1)  # 避免请求过快
                     
                 except Exception as e:
                     print(f"  ✗ {symbol}: 下载失败 - {str(e)}")
