@@ -1,7 +1,7 @@
-"""量化策略回测固定模块 - 获取真实市场数据"""
+"""量化策略回测固定模块 - 使用 Alpha Vantage 真实数据"""
 import numpy as np
 import pandas as pd
-import yfinance as yf
+from alpha_vantage.timeseries import TimeSeries
 import time
 
 SYMBOLS = ["SPY", "QQQ", "AAPL"]
@@ -10,46 +10,51 @@ END_DATE = "2024-12-31"
 INITIAL_CAPITAL = 100000
 COMMISSION = 0.001
 
+# ⚠️ 替换成你自己的 API Key！
+API_KEY = "OM13JLVGRSUU9J2M"  # 替换为你的 API Key
+
 class DataCache:
     _cache = {}
     
     @classmethod
     def get_data(cls, symbols, start_date, end_date):
-        """获取真实市场数据 - 带重试机制"""
+        """从 Alpha Vantage 获取真实市场数据"""
         key = (tuple(sorted(symbols)), start_date, end_date)
         if key not in cls._cache:
             data = {}
-            print(f"📊 下载真实行情数据 {len(symbols)} 个品种...")
+            print(f"📊 从 Alpha Vantage 下载真实行情数据 {len(symbols)} 个品种...")
+            print(f"⚠️  首次下载会比较慢，请耐心等待...")
+            
+            ts = TimeSeries(key=API_KEY, output_format='pandas')
+            
             for symbol in symbols:
-                max_retries = 3
-                for attempt in range(max_retries):
-                    try:
-                        print(f"  ⏳ 正在下载 {symbol}... (尝试 {attempt+1}/{max_retries})")
-                        
-                        # 下载数据
-                        df = yf.download(
-                            symbol, 
-                            start=start_date, 
-                            end=end_date, 
-                            progress=False,
-                            timeout=30
-                        )
-                        
-                        if df.empty or len(df) == 0:
-                            raise ValueError(f"{symbol} 返回空数据")
-                        
-                        data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
-                        print(f"  ✓ {symbol}: {len(df)} 根 K 线")
-                        break
-                        
-                    except Exception as e:
-                        if attempt < max_retries - 1:
-                            wait_time = (attempt + 1) * 5  # 5s, 10s, 15s
-                            print(f"  ⚠️  下载失败，{wait_time}秒后重试...")
-                            time.sleep(wait_time)
-                        else:
-                            print(f"  ✗ {symbol}: 下载失败 - {str(e)}")
-                            return None
+                try:
+                    print(f"  ⏳ 正在下载 {symbol}...")
+                    
+                    # 获取日线数据
+                    df, meta = ts.get_daily(symbol=symbol, outputsize='full')
+                    
+                    # 重命名列
+                    df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    df.index.name = 'Date'
+                    df = df.sort_index()
+                    
+                    # 过滤时间范围
+                    df = df[start_date:end_date]
+                    
+                    # 转换数据类型
+                    for col in ['Open', 'High', 'Low', 'Close']:
+                        df[col] = pd.to_numeric(df[col])
+                    df['Volume'] = pd.to_numeric(df['Volume'])
+                    
+                    data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
+                    print(f"  ✓ {symbol}: {len(df)} 根 K 线")
+                    
+                    time.sleep(1)  # API 速率限制
+                    
+                except Exception as e:
+                    print(f"  ✗ {symbol}: 下载失败 - {str(e)}")
+                    return None
             
             cls._cache[key] = data
         return cls._cache[key]
