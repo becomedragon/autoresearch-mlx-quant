@@ -1,11 +1,15 @@
-"""量化策略回测固定模块 - 使用真实市场逻辑的模拟数据"""
+"""量化策略回测固定模块 - A股真实数据"""
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+import tushare as ts
+import time
 
-SYMBOLS = ["SPY", "QQQ", "AAPL"]
-START_DATE = "2023-01-01"
-END_DATE = "2024-12-31"
+# ⚠️ 替换成你的 Tushare Token！
+TOKEN = "d5319aa70ec2b59f41e92dd2c7b62556fd61cf261c4f720cd13d5d32"  # 从 https://www.tushare.pro/ 获取
+
+SYMBOLS = ["000001.SZ", "000858.SZ", "600000.SH"]  # 平安银行、五粮液、浦发银行
+START_DATE = "20230101"
+END_DATE = "20241231"
 INITIAL_CAPITAL = 100000
 COMMISSION = 0.001
 
@@ -13,70 +17,51 @@ class DataCache:
     _cache = {}
     
     @classmethod
-    def generate_realistic_data(cls, symbol, start_date, end_date, base_price, volatility=0.015, drift=0.0005):
-        """生成基于真实市场逻辑的模拟数据"""
-        start = pd.to_datetime(start_date)
-        end = pd.to_datetime(end_date)
-        date_range = pd.date_range(start=start, end=end, freq='B')
-        
-        # 使用与符号相关的种子，保证可重现
-        np.random.seed(hash(symbol) % 2**32)
-        
-        # 生成几何布朗运动（GBM）- 真实股价模型
-        n = len(date_range)
-        dt = 1/252  # 每日时间步
-        
-        # 随机游走
-        returns = np.random.normal(drift * dt, volatility * np.sqrt(dt), n)
-        prices = base_price * np.exp(np.cumsum(returns))
-        
-        # 生成 OHLCV 数据
-        opens = prices * (1 + np.random.uniform(-0.005, 0.005, n))
-        highs = np.maximum(opens, prices) * (1 + np.abs(np.random.uniform(0, 0.01, n)))
-        lows = np.minimum(opens, prices) * (1 - np.abs(np.random.uniform(0, 0.01, n)))
-        closes = prices
-        volumes = np.random.randint(1000000, 100000000, n)
-        
-        df = pd.DataFrame({
-            'Open': opens,
-            'High': highs,
-            'Low': lows,
-            'Close': closes,
-            'Volume': volumes
-        }, index=date_range)
-        
-        return df.sort_index()
-    
-    @classmethod
     def get_data(cls, symbols, start_date, end_date):
-        """获取模拟数据"""
+        """从 Tushare 获取 A股真实数据"""
         key = (tuple(sorted(symbols)), start_date, end_date)
         if key not in cls._cache:
             data = {}
-            print(f"📊 生成真实市场逻辑的模拟行情数据 {len(symbols)} 个品种...")
+            print(f"📊 从 Tushare 下载 A股真实行情数据 {len(symbols)} 个...")
             
-            # 基础价格和波动率设置（基于真实市场特征）
-            configs = {
-                "SPY": {"price": 380, "volatility": 0.012, "drift": 0.0006},
-                "QQQ": {"price": 380, "volatility": 0.018, "drift": 0.0008},
-                "AAPL": {"price": 180, "volatility": 0.020, "drift": 0.0010}
-            }
+            pro = ts.pro_api(TOKEN)
             
             for symbol in symbols:
                 try:
-                    config = configs.get(symbol, {"price": 100, "volatility": 0.015, "drift": 0.0005})
-                    df = cls.generate_realistic_data(
-                        symbol, 
-                        start_date, 
-                        end_date,
-                        base_price=config["price"],
-                        volatility=config["volatility"],
-                        drift=config["drift"]
+                    print(f"  ⏳ 正在下载 {symbol}...")
+                    
+                    # 获取日线数据
+                    df = pro.daily(
+                        ts_code=symbol,
+                        start_date=start_date,
+                        end_date=end_date
                     )
-                    data[symbol] = df
-                    print(f"  ✓ {symbol}: {len(df)} 根 K 线 (基础价格: ${config['price']:.0f})")
+                    
+                    if df is None or df.empty:
+                        print(f"  ✗ {symbol}: 返回空数据")
+                        return None
+                    
+                    # 按时间排序
+                    df = df.sort_values('trade_date')
+                    df['trade_date'] = pd.to_datetime(df['trade_date'])
+                    df = df.set_index('trade_date')
+                    
+                    # 重命名列
+                    df = df.rename(columns={
+                        'open': 'Open',
+                        'high': 'High',
+                        'low': 'Low',
+                        'close': 'Close',
+                        'vol': 'Volume'
+                    })
+                    
+                    data[symbol] = df[['Open', 'High', 'Low', 'Close', 'Volume']].copy()
+                    print(f"  ✓ {symbol}: {len(df)} 根 K 线")
+                    
+                    time.sleep(0.5)  # API 速率限制
+                    
                 except Exception as e:
-                    print(f"  ✗ {symbol}: 生成失败 - {str(e)}")
+                    print(f"  ✗ {symbol}: 下载失败 - {str(e)}")
                     return None
             
             cls._cache[key] = data
