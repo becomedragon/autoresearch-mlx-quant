@@ -101,7 +101,7 @@ def run_backtest():
         current_pnl = 0
         for symbol in SYMBOLS:
             ohlcv = data_dict[symbol]
-            close_price = ohlcv['Close'].iloc[day_idx]
+            close_price = float(ohlcv['Close'].iloc[day_idx])
             signal = generate_signal(ohlcv['Close'].values[:day_idx+1], ohlcv['High'].values[:day_idx+1], ohlcv['Low'].values[:day_idx+1], day_idx)
             max_shares = int(portfolio_value[-1] * MAX_POSITION_SIZE / close_price)
             if signal == 1 and positions[symbol] == 0 and max_shares > 0:
